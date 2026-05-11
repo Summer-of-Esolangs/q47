@@ -1,18 +1,15 @@
 const std = @import("std");
 const Io = std.Io;
-
 const preprocess = @import("preprocess.zig");
+const Interpreter = @import("interpreter.zig");
 const Op = preprocess.Op;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const alloc = init.gpa;
-
     var args = init.minimal.args.iterate();
     _ = args.next();
-
     var source: []u8 = undefined;
-
     if (args.next()) |file_path| {
         source = try std.Io.Dir.cwd().readFileAlloc(
             io,
@@ -24,16 +21,19 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("Missing Q47 file!!!\n", .{});
         std.process.exit(1);
     }
-
     defer alloc.free(source);
 
     var top_level: Op = .{ .grouping = .empty };
     defer top_level.deinit(alloc);
 
     var data: []const u8 = source;
-
     while (data.len > 0) {
         const op, data = try preprocess.statement(alloc, data);
+        if (op == .eof) break;
         try top_level.grouping.append(alloc, op);
     }
+
+    var interp = Interpreter.init();
+    defer interp.deinit(alloc);
+    _ = try interp.runSlice(alloc, io, top_level.grouping.items);
 }

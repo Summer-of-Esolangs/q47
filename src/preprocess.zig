@@ -73,8 +73,76 @@ pub fn statement(alloc: std.mem.Allocator, data: []const u8) !struct { Op, []con
 
         ' ', '\t', '\n' => return statement(alloc, data[1..]),
 
-        '(' => return error.TODO, // TODO: Grouping
-        '{' => return error.TODO, // TODO: conditional or repeat
+        '(' => {
+            var ops: std.ArrayList(Op) = .empty;
+            errdefer {
+                for (ops.items) |*s| s.deinit(alloc);
+                ops.deinit(alloc);
+            }
+            var rest = data[1..];
+            while (true) {
+                if (rest.len == 0) return error.InvalidChar;
+                if (rest[0] == ')') break;
+                const op, const next = try statement(alloc, rest);
+                try ops.append(alloc, op);
+                rest = next;
+            }
+            return .{ .{ .grouping = ops }, rest[1..] };
+        },
+
+        '{' => {
+            if (data.len < 2) return error.InvalidChar;
+            var rest = data[1..];
+
+            switch (rest[0]) {
+                '0'...'9' => |n| {
+                    rest = rest[1..];
+                    if (rest.len == 0 or rest[0] != '~') return error.InvalidChar;
+                    rest = rest[1..];
+
+                    var ops: std.ArrayList(Op) = .empty;
+                    errdefer {
+                        for (ops.items) |*s| s.deinit(alloc);
+                        ops.deinit(alloc);
+                    }
+                    while (true) {
+                        if (rest.len == 0) return error.InvalidChar;
+                        if (rest[0] == '}') break;
+                        const op, const next = try statement(alloc, rest);
+                        try ops.append(alloc, op);
+                        rest = next;
+                    }
+                    return .{ .{ .repeat = .{ .times = n - '0', .action = ops } }, rest[1..] };
+                },
+                '>', '<', '=' => |c| {
+                    rest = rest[1..];
+                    if (rest.len == 0) return error.InvalidChar;
+                    const comp = rest[0];
+                    rest = rest[1..];
+                    if (rest.len == 0 or rest[0] != '|') return error.InvalidChar;
+                    rest = rest[1..];
+
+                    var ops: std.ArrayList(Op) = .empty;
+                    errdefer {
+                        for (ops.items) |*s| s.deinit(alloc);
+                        ops.deinit(alloc);
+                    }
+
+                    while (true) {
+                        if (rest.len == 0) return error.InvalidChar;
+                        if (rest[0] == '}') break;
+                        const op, const next = try statement(alloc, rest);
+                        try ops.append(alloc, op);
+                        rest = next;
+                    }
+
+                    const cond: Condition = @enumFromInt(c);
+                    return .{ .{ .conditional = .{ .cond = cond, .comp = comp - '0', .action = ops } }, rest[1..] };
+                },
+                else => return error.InvalidChar,
+            }
+        },
+
         else => return error.InvalidChar,
     }
 }
